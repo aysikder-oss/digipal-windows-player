@@ -38,9 +38,7 @@ let isRelaunchingFromMinimize = false;
 function setAutoStart(enabled) {
   try {
     app.setLoginItemSettings({
-      openAtLogin: enabled,
-      path: process.execPath,
-      args: []
+      openAtLogin: enabled
     });
   } catch (e) {}
 }
@@ -111,6 +109,10 @@ function createWindow() {
 
   if (kioskMode) {
     registerKioskShortcuts();
+  }
+
+  if (getSetting('autoStart', false)) {
+    setAutoStart(true);
   }
 }
 
