@@ -1,31 +1,52 @@
-const { app, BrowserWindow, powerSaveBlocker, ipcMain, globalShortcut, dialog } = require('electron');
+const { app, BrowserWindow, powerSaveBlocker, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
-const Store = require('electron-store').default || require('electron-store');
-const AutoLaunch = require('auto-launch');
+const fs = require('fs');
 
-const store = new Store({
-  defaults: {
-    serverUrl: 'https://digipal-cms.replit.app',
-    autoRelaunch: false,
-    autoStart: false,
-    kioskMode: false,
-    hideCursor: false,
-    screenWakeLock: true
-  }
-});
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(settingsPath)) {
+      return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    }
+  } catch (e) {}
+  return {};
+}
+
+function saveSettings(settings) {
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  } catch (e) {}
+}
+
+function getSetting(key, defaultValue) {
+  var settings = loadSettings();
+  return settings[key] !== undefined ? settings[key] : defaultValue;
+}
+
+function setSetting(key, value) {
+  var settings = loadSettings();
+  settings[key] = value;
+  saveSettings(settings);
+}
 
 let mainWindow = null;
 let powerBlockerId = null;
 let isQuitting = false;
 let isRelaunchingFromMinimize = false;
 
-const autoLauncher = new AutoLaunch({
-  name: 'Digipal Player',
-  isHidden: false
-});
+function setAutoStart(enabled) {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      path: process.execPath,
+      args: []
+    });
+  } catch (e) {}
+}
 
 function createWindow() {
-  const kioskMode = store.get('kioskMode', false);
+  var kioskMode = getSetting('kioskMode', false);
 
   mainWindow = new BrowserWindow({
     width: 1920,
@@ -45,15 +66,15 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
 
-  const serverUrl = store.get('serverUrl', 'https://digipal-cms.replit.app');
-  const playerUrl = serverUrl.endsWith('/') ? serverUrl + 'player.html' : serverUrl + '/player.html';
+  var serverUrl = getSetting('serverUrl', 'https://digipal-cms.replit.app');
+  var playerUrl = serverUrl.endsWith('/') ? serverUrl + 'player.html' : serverUrl + '/player.html';
   mainWindow.loadURL(playerUrl);
 
-  mainWindow.on('close', (e) => {
-    if (!isQuitting && store.get('autoRelaunch', false)) {
+  mainWindow.on('close', function(e) {
+    if (!isQuitting && getSetting('autoRelaunch', false)) {
       e.preventDefault();
       mainWindow.hide();
-      setTimeout(() => {
+      setTimeout(function() {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.show();
           mainWindow.setFullScreen(true);
@@ -63,12 +84,12 @@ function createWindow() {
     }
   });
 
-  mainWindow.on('minimize', (e) => {
-    if (store.get('autoRelaunch', false) && !isRelaunchingFromMinimize) {
+  mainWindow.on('minimize', function(e) {
+    if (getSetting('autoRelaunch', false) && !isRelaunchingFromMinimize) {
       e.preventDefault();
       isRelaunchingFromMinimize = true;
       mainWindow.hide();
-      setTimeout(() => {
+      setTimeout(function() {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.show();
           mainWindow.restore();
@@ -80,11 +101,11 @@ function createWindow() {
     }
   });
 
-  mainWindow.on('closed', () => {
+  mainWindow.on('closed', function() {
     mainWindow = null;
   });
 
-  if (store.get('screenWakeLock', true)) {
+  if (getSetting('screenWakeLock', true)) {
     enableWakeLock();
   }
 
@@ -108,13 +129,12 @@ function disableWakeLock() {
 
 function registerKioskShortcuts() {
   try {
-    globalShortcut.register('Alt+F4', () => {});
-    globalShortcut.register('Alt+Tab', () => {});
-    globalShortcut.register('CommandOrControl+W', () => {});
-    globalShortcut.register('CommandOrControl+Q', () => {});
-    globalShortcut.register('F11', () => {});
-    globalShortcut.register('Escape', () => {});
-    globalShortcut.register('Super', () => {});
+    globalShortcut.register('Alt+F4', function() {});
+    globalShortcut.register('Alt+Tab', function() {});
+    globalShortcut.register('CommandOrControl+W', function() {});
+    globalShortcut.register('CommandOrControl+Q', function() {});
+    globalShortcut.register('F11', function() {});
+    globalShortcut.register('Escape', function() {});
   } catch (e) {}
 }
 
@@ -122,29 +142,23 @@ function unregisterKioskShortcuts() {
   globalShortcut.unregisterAll();
 }
 
-ipcMain.handle('get-settings', () => {
+ipcMain.handle('get-settings', function() {
   return {
-    serverUrl: store.get('serverUrl'),
-    autoRelaunch: store.get('autoRelaunch'),
-    autoStart: store.get('autoStart'),
-    kioskMode: store.get('kioskMode'),
-    hideCursor: store.get('hideCursor'),
-    screenWakeLock: store.get('screenWakeLock')
+    serverUrl: getSetting('serverUrl', 'https://digipal-cms.replit.app'),
+    autoRelaunch: getSetting('autoRelaunch', false),
+    autoStart: getSetting('autoStart', false),
+    kioskMode: getSetting('kioskMode', false),
+    hideCursor: getSetting('hideCursor', false),
+    screenWakeLock: getSetting('screenWakeLock', true)
   };
 });
 
-ipcMain.handle('set-setting', async (event, key, value) => {
-  store.set(key, value);
+ipcMain.handle('set-setting', function(event, key, value) {
+  setSetting(key, value);
 
   switch (key) {
     case 'autoStart':
-      try {
-        if (value) {
-          await autoLauncher.enable();
-        } else {
-          await autoLauncher.disable();
-        }
-      } catch (e) {}
+      setAutoStart(value);
       break;
 
     case 'kioskMode':
@@ -168,7 +182,7 @@ ipcMain.handle('set-setting', async (event, key, value) => {
 
     case 'serverUrl':
       if (mainWindow) {
-        const playerUrl = value.endsWith('/') ? value + 'player.html' : value + '/player.html';
+        var playerUrl = value.endsWith('/') ? value + 'player.html' : value + '/player.html';
         mainWindow.loadURL(playerUrl);
       }
       break;
@@ -180,34 +194,34 @@ ipcMain.handle('set-setting', async (event, key, value) => {
   return true;
 });
 
-ipcMain.handle('force-quit', () => {
+ipcMain.handle('force-quit', function() {
   isQuitting = true;
   app.quit();
 });
 
-ipcMain.handle('get-app-version', () => {
+ipcMain.handle('get-app-version', function() {
   return app.getVersion();
 });
 
-app.on('ready', () => {
+app.on('ready', function() {
   createWindow();
 });
 
-app.on('window-all-closed', () => {
-  if (store.get('autoRelaunch', false) && !isQuitting) {
+app.on('window-all-closed', function() {
+  if (getSetting('autoRelaunch', false) && !isQuitting) {
     createWindow();
   } else {
     app.quit();
   }
 });
 
-app.on('activate', () => {
+app.on('activate', function() {
   if (mainWindow === null) {
     createWindow();
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', function() {
   isQuitting = true;
   unregisterKioskShortcuts();
   disableWakeLock();
